@@ -60,10 +60,22 @@ export default function Home() {
   const [tick, setTick] = useState(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  const [isMuted, setIsMuted] = useState(true);
 
   // 리프레시(새로고침)할 때마다 타일의 랜덤 배치가 완전히 바뀌도록 마운트 시점에 고유 시드(seed) 결정
   const [seed] = useState(() => Math.floor(Math.random() * 1000000));
+
+  // 1. 오디오 Muted 변경 시 HTMLAudioElement 속성 동기화 및 재생
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.muted = isMuted;
+      audioRef.current.play().catch((err) => {
+        console.log('Autoplay check:', err);
+      });
+    }
+  }, [isMuted]);
 
   // 1. 컴포넌트 마운트 시 실시간으로 /api/pets API를 호출하여 파일 목록 갱신 및 윈도우 크기 설정
   useEffect(() => {
@@ -77,45 +89,11 @@ export default function Home() {
         }
       })
       .catch(err => {
-        console.warn('API server not running or production environment, falling back to static list:', err);
+        console.warn('Vite API server not running or production environment, falling back to static list:', err);
       });
   }, []);
 
-  // 2. 배경음악 즉시 자동 재생 및 브라우저 자동 재생 제약 우회 리스너
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    audio.loop = true;
-    audio.volume = 0.5; // 배경음악 적절 볼륨
-
-    // 브라우저가 즉시 play()를 허용하는 경우 바로 재생 시도
-    audio.play().catch(err => {
-      console.log('Autoplay blocked. Background music will start on first user interaction.', err);
-    });
-
-    // 만약 브라우저가 자동 재생을 막았다면, 사용자의 첫 클릭/터치/스크롤 등의 이벤트가 발생하는 즉시 재생 시작
-    const startAudioOnInteraction = () => {
-      audio.play().catch(e => console.log('Interactive play failed:', e));
-      
-      // 단 한 번만 실행되도록 리스너를 즉시 제거
-      window.removeEventListener('click', startAudioOnInteraction);
-      window.removeEventListener('touchstart', startAudioOnInteraction);
-      window.removeEventListener('scroll', startAudioOnInteraction);
-    };
-
-    window.addEventListener('click', startAudioOnInteraction);
-    window.addEventListener('touchstart', startAudioOnInteraction);
-    window.addEventListener('scroll', startAudioOnInteraction);
-
-    return () => {
-      window.removeEventListener('click', startAudioOnInteraction);
-      window.removeEventListener('touchstart', startAudioOnInteraction);
-      window.removeEventListener('scroll', startAudioOnInteraction);
-    };
-  }, []);
-
-  // 3. 1초마다 프레임을 회전시키는 글로벌 타이머
+  // 2. 1초마다 프레임을 회전시키는 글로벌 타이머
   useEffect(() => {
     const timer = setInterval(() => {
       setTick(prev => (prev + 1) % 4);
@@ -123,7 +101,7 @@ export default function Home() {
     return () => clearInterval(timer);
   }, []);
 
-  // 4. GSAP 기반 정교한 확대/축소 루프 애니메이션
+  // 3. GSAP 기반 정교한 확대/축소 루프 애니메이션
   // 12초 후 1초간 확대 (expo.inOut) -> 4초 대기 -> 1초간 축소 (expo.inOut) -> 12초 대기 반복
   useEffect(() => {
     if (!containerRef.current) return;
@@ -148,7 +126,7 @@ export default function Home() {
     return () => ctx.revert();
   }, [petImages]);
 
-  // 5. 화면 리사이즈 감지
+  // 4. 화면 리사이즈 감지
   useEffect(() => {
     function handleResize() {
       setWinSize({ w: window.innerWidth, h: window.innerHeight });
@@ -157,7 +135,7 @@ export default function Home() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // 6. requestAnimationFrame 기반 30도 사선 우상단 무한 스크롤 루프
+  // 5. requestAnimationFrame 기반 30도 사선 우상단 무한 스크롤 루프
   useEffect(() => {
     let lastTime = performance.now();
     let animationFrameId: number;
@@ -192,7 +170,7 @@ export default function Home() {
     return petImages[hash];
   }
 
-  // 7. 화면 크기와 스크롤 오프셋을 바탕으로 렌더링에 필요한 타일 범위 및 위치 계산
+  // 6. 화면 크기와 스크롤 오프셋을 바탕으로 렌더링에 필요한 타일 범위 및 위치 계산
   const tileSize = 100;
   const gapX = 336; // X축(가로) 간격
   const gapY = 48;  // Y축(세로) 간격
@@ -210,7 +188,7 @@ export default function Home() {
   // 현재 프레임의 크기 오프셋 좌표
   const frameCoords = scaledFrames[tick];
 
-  // 8. 절대 좌표 기반 지그재그 타일 배열 계산 (각 행마다 가로 오프셋 부여)
+  // 7. 절대 좌표 기반 지그재그 타일 배열 계산 (각 행마다 가로 오프셋 부여)
   const tileElements = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -250,20 +228,31 @@ export default function Home() {
   }
 
   return (
-    <div className="w-screen h-screen overflow-hidden bg-[#ffffff] relative select-none">
-      
-      {/* 9. 배경음악 오디오 태그 엘리먼트 (무한반복 지정) */}
-      <audio 
-        ref={audioRef} 
-        src="/bgm/pet_march_bgm.opus" 
-        preload="auto" 
+    <div className="w-screen h-screen overflow-hidden bg-[#ffffff] relative select-none pointer-events-none">
+      {/* 배경음악 오디오 요소 */}
+      <audio
+        ref={audioRef}
+        src="/bgm/pet_march_bgm.opus"
         loop
+        autoPlay
+        playsInline
       />
+
+      {/* 우측 상단 음소거 토글 버튼 */}
+      <button
+        onClick={() => setIsMuted(prev => !prev)}
+        className="absolute top-6 right-6 z-50 flex items-center justify-center w-12 h-12 bg-white/90 hover:bg-white border border-slate-200/80 rounded-full shadow-lg backdrop-blur-sm pointer-events-auto transition-all duration-200 active:scale-95 text-slate-800 cursor-pointer"
+        aria-label="배경음악 토글"
+      >
+        <span className="material-icons text-2xl select-none">
+          {isMuted ? 'volume_up' : 'volume_off'}
+        </span>
+      </button>
 
       {/* GSAP 제어를 위한 ref 등록 및 초기 정중앙 기준점 설정 */}
       <div
         ref={containerRef}
-        className="w-full h-full absolute top-0 left-0 pointer-events-none"
+        className="w-full h-full absolute top-0 left-0"
         style={{
           transform: 'scale(1)',
           transformOrigin: 'center center'

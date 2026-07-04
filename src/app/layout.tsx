@@ -13,6 +13,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ko">
+      <head>
+        <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+      </head>
       <body className="m-0 p-0 overflow-hidden select-none bg-[#ffffff]">{children}</body>
     </html>
   );
