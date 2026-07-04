@@ -59,7 +59,11 @@ export default function Home() {
   const [scroll, setScroll] = useState({ x: 0, y: 0 });
   const [tick, setTick] = useState(0);
 
+  // 배경음악(BGM) 재생 상태 및 볼륨 상태
+  const [isAudioMuted, setIsAudioMuted] = useState(true);
+  
   const containerRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // 리프레시(새로고침)할 때마다 타일의 랜덤 배치가 완전히 바뀌도록 마운트 시점에 고유 시드(seed) 결정
   const [seed] = useState(() => Math.floor(Math.random() * 1000000));
@@ -76,11 +80,43 @@ export default function Home() {
         }
       })
       .catch(err => {
-        console.warn('Vite API server not running or production environment, falling back to static list:', err);
+        console.warn('API server not running or production environment, falling back to static list:', err);
       });
   }, []);
 
-  // 2. 1초마다 프레임을 회전시키는 글로벌 타이머
+  // 2. 배경음악 자동 재생 정책 대응 글로벌 리스너 등록
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    audio.loop = true;
+    audio.volume = 0.5; // 너무 크지 않도록 적절한 볼륨(50%)으로 설정
+
+    // 브라우저의 오디오 자동재생 제약을 풀기 위해 사용자의 첫 터치/클릭 감지 시 오디오 재생을 부드럽게 개시
+    const initAndPlayAudio = () => {
+      audio.play()
+        .then(() => {
+          setIsAudioMuted(false); // 재생 성공 시 뮤트 상태 해제
+        })
+        .catch(err => {
+          console.log('Autoplay blocked by browser. Awaiting explicit user click.', err);
+        });
+
+      // 리스너 정리
+      window.removeEventListener('click', initAndPlayAudio);
+      window.removeEventListener('touchstart', initAndPlayAudio);
+    };
+
+    window.addEventListener('click', initAndPlayAudio);
+    window.addEventListener('touchstart', initAndPlayAudio);
+
+    return () => {
+      window.removeEventListener('click', initAndPlayAudio);
+      window.removeEventListener('touchstart', initAndPlayAudio);
+    };
+  }, []);
+
+  // 3. 1초마다 프레임을 회전시키는 글로벌 타이머
   useEffect(() => {
     const timer = setInterval(() => {
       setTick(prev => (prev + 1) % 4);
@@ -88,7 +124,7 @@ export default function Home() {
     return () => clearInterval(timer);
   }, []);
 
-  // 3. GSAP 기반 정교한 확대/축소 루프 애니메이션
+  // 4. GSAP 기반 정교한 확대/축소 루프 애니메이션
   // 12초 후 1초간 확대 (expo.inOut) -> 4초 대기 -> 1초간 축소 (expo.inOut) -> 12초 대기 반복
   useEffect(() => {
     if (!containerRef.current) return;
@@ -113,7 +149,7 @@ export default function Home() {
     return () => ctx.revert();
   }, [petImages]);
 
-  // 4. 화면 리사이즈 감지
+  // 5. 화면 리사이즈 감지
   useEffect(() => {
     function handleResize() {
       setWinSize({ w: window.innerWidth, h: window.innerHeight });
@@ -122,7 +158,7 @@ export default function Home() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // 5. requestAnimationFrame 기반 30도 사선 우상단 무한 스크롤 루프
+  // 6. requestAnimationFrame 기반 30도 사선 우상단 무한 스크롤 루프
   useEffect(() => {
     let lastTime = performance.now();
     let animationFrameId: number;
@@ -150,6 +186,25 @@ export default function Home() {
     return () => cancelAnimationFrame(animationFrameId);
   }, []);
 
+  // 오디오 음소거/해제 수동 토글 헬퍼
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation(); // 배경 클릭 이벤트 트리거 전이 방지
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (isAudioMuted) {
+      audio.play()
+        .then(() => {
+          setIsAudioMuted(false);
+          audio.muted = false;
+        })
+        .catch(err => console.error('Play failed:', err));
+    } else {
+      audio.muted = true;
+      setIsAudioMuted(true);
+    }
+  };
+
   // 새로고침 시 설정된 seed와 좌표값을 조합하여 일관된(결정론적) 이미지를 렌더링하는 헬퍼 함수
   function getDeterministicPetImage(x: number, y: number): string {
     if (petImages.length === 0) return '';
@@ -157,7 +212,7 @@ export default function Home() {
     return petImages[hash];
   }
 
-  // 6. 화면 크기와 스크롤 오프셋을 바탕으로 렌더링에 필요한 타일 범위 및 위치 계산
+  // 7. 화면 크기와 스크롤 오프셋을 바탕으로 렌더링에 필요한 타일 범위 및 위치 계산
   const tileSize = 100;
   const gapX = 336; // X축(가로) 간격
   const gapY = 48;  // Y축(세로) 간격
@@ -175,7 +230,7 @@ export default function Home() {
   // 현재 프레임의 크기 오프셋 좌표
   const frameCoords = scaledFrames[tick];
 
-  // 7. 절대 좌표 기반 지그재그 타일 배열 계산 (각 행마다 가로 오프셋 부여)
+  // 8. 절대 좌표 기반 지그재그 타일 배열 계산 (각 행마다 가로 오프셋 부여)
   const tileElements = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -215,11 +270,41 @@ export default function Home() {
   }
 
   return (
-    <div className="w-screen h-screen overflow-hidden bg-[#ffffff] relative select-none pointer-events-none">
+    <div className="w-screen h-screen overflow-hidden bg-[#ffffff] relative select-none">
+      
+      {/* 9. 배경음악 오디오 태그 엘리먼트 (무한반복 지정) */}
+      <audio 
+        ref={audioRef} 
+        src="/bgm/pet_march_bgm.opus" 
+        preload="auto" 
+        loop
+      />
+
+      {/* 10. 프리미엄 플로팅 오디오 제어 버튼 UI (자동 재생이 차단될 수 있으므로 직관적인 토글 제공) */}
+      <button
+        onClick={toggleMute}
+        title={isAudioMuted ? "배경음악 켜기" : "배경음악 끄기"}
+        className="fixed top-6 right-6 z-50 flex items-center justify-center w-12 h-12 rounded-full border border-slate-200/80 bg-white/90 shadow-md backdrop-blur-sm transition-all duration-300 hover:bg-slate-50 active:scale-95 cursor-pointer"
+      >
+        {isAudioMuted ? (
+          <span className="text-xl text-slate-400 select-none">🔇</span>
+        ) : (
+          <div className="flex items-center justify-center gap-1.5">
+            <span className="text-xl text-emerald-500 select-none">🔊</span>
+            {/* 음파 댄싱 바 그래픽 효과 */}
+            <div className="flex items-end gap-[2px] h-3 w-3 select-none">
+              <span className="w-[1.5px] h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s', animationDuration: '0.6s' }}></span>
+              <span className="w-[1.5px] h-2.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0.3s', animationDuration: '0.8s' }}></span>
+              <span className="w-[1.5px] h-2 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0.5s', animationDuration: '0.5s' }}></span>
+            </div>
+          </div>
+        )}
+      </button>
+
       {/* GSAP 제어를 위한 ref 등록 및 초기 정중앙 기준점 설정 */}
       <div
         ref={containerRef}
-        className="w-full h-full absolute top-0 left-0"
+        className="w-full h-full absolute top-0 left-0 pointer-events-none"
         style={{
           transform: 'scale(1)',
           transformOrigin: 'center center'
