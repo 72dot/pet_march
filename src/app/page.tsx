@@ -53,23 +53,79 @@ const fallbackPetImages = [
   '/pet/dog_Yorkshire_Terrier.webp'
 ];
 
-// 8방향 이웃 탐색 오프셋
-const dr = [-1, -1, -1, 0, 0, 1, 1, 1];
-const dc = [-1, 0, 1, -1, 1, -1, 0, 1];
+// 토러스 공간 내에서의 두 타일 중심점 간 최단 물리적 유클리드 거리 계산
+function getTorusPhysicalDistance(
+  r1: number,
+  c1: number,
+  r2: number,
+  c2: number,
+  N: number,
+  pitchX: number,
+  pitchY: number,
+  tileSize: number
+): number {
+  let dr = r2 - r1;
+  let dc = c2 - c1;
 
-// 8방향 인접성 검사 (토러스 원형 경계 랩핑 보정 적용)
-function isSafe(grid: string[][], r: number, c: number, img: string, N: number): boolean {
-  for (let i = 0; i < 8; i++) {
-    const nr = (r + dr[i] + N) % N;
-    const nc = (c + dc[i] + N) % N;
-    if (grid[nr][nc] === img) {
+  // 토러스 무한 랩핑 보정
+  dr = ((dr % N) + N) % N;
+  if (dr > N / 2) dr -= N;
+
+  dc = ((dc % N) + N) % N;
+  if (dc > N / 2) dc -= N;
+
+  const r2_corrected = r1 + dr;
+  const c2_corrected = c1 + dc;
+
+  // 행마다 pitchX/2의 X축 엇갈림 오프셋 적용
+  const cx1 = c1 * pitchX + ((r1 % 2 !== 0) ? pitchX / 2 : 0) + tileSize / 2;
+  const cy1 = r1 * pitchY + tileSize / 2;
+
+  const cx2 = c2_corrected * pitchX + ((Math.abs(r2_corrected) % 2 !== 0) ? pitchX / 2 : 0) + tileSize / 2;
+  const cy2 = r2_corrected * pitchY + tileSize / 2;
+
+  const dx = cx1 - cx2;
+  const dy = cy1 - cy2;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+// 백트래킹 성능 극대화를 위한 물리적 거리 임계값 미만 인접 목록(Adjacency List) 테이블 빌드
+function buildAdjacencyList(
+  N: number,
+  pitchX: number,
+  pitchY: number,
+  tileSize: number,
+  threshold: number
+): number[][] {
+  const adj: number[][] = Array.from({ length: N * N }, () => []);
+  for (let i = 0; i < N * N; i++) {
+    const r1 = Math.floor(i / N);
+    const c1 = i % N;
+    // 백트래킹 시 이미 배치된 이전 인덱스들과만 거리를 비교
+    for (let j = 0; j < i; j++) {
+      const r2 = Math.floor(j / N);
+      const c2 = j % N;
+      const dist = getTorusPhysicalDistance(r1, c1, r2, c2, N, pitchX, pitchY, tileSize);
+      if (dist < threshold) {
+        adj[i].push(j);
+      }
+    }
+  }
+  return adj;
+}
+
+// 고속 룩업 테이블 기반 인접성 검사
+function isSafeFast(flatGrid: string[], index: number, img: string, adjList: number[][]): boolean {
+  const neighbors = adjList[index];
+  for (let i = 0; i < neighbors.length; i++) {
+    if (flatGrid[neighbors[i]] === img) {
       return false;
     }
   }
   return true;
 }
 
-// 랜덤 셔플 헬퍼 함수 (무작위 후보군 대입용)
+// 랜덤 셔플 헬퍼 함수
 function shuffleArray<T>(array: T[]): T[] {
   const arr = [...array];
   for (let i = arr.length - 1; i > 0; i--) {
@@ -79,43 +135,53 @@ function shuffleArray<T>(array: T[]): T[] {
   return arr;
 }
 
-// 2D 백트래킹(Backtracking) 알고리즘으로 N x N 토러스형 충돌 없는 지도 생성
-function generateTorusMap(petImages: string[], N: number): string[][] {
-  const grid: string[][] = Array.from({ length: N }, () => Array(N).fill(''));
+// 물리적 유클리드 거리 제약 조건 기반의 토러스형 백트래킹 지도 빌더
+function generateTorusPhysicalMap(
+  petImages: string[],
+  N: number,
+  pitchX: number,
+  pitchY: number,
+  tileSize: number,
+  threshold: number
+): string[][] {
+  const flatGrid = Array(N * N).fill('');
+  const adjList = buildAdjacencyList(N, pitchX, pitchY, tileSize, threshold);
 
   function solve(index: number): boolean {
     if (index === N * N) {
-      return true; // 전체 지도가 충돌 없이 완성됨
+      return true; // 충돌 없이 전체 배치 성공
     }
 
-    const r = Math.floor(index / N);
-    const c = index % N;
-
-    // 매번 후보 이미지를 셔플하여 새로고침할 때마다 매번 완전히 다른 레이아웃이 나오게 제어
+    // 후보군을 셔플하여 새로고침 시마다 완전 무작위 셔플 보장
     const candidates = shuffleArray(petImages);
 
     for (const img of candidates) {
-      if (isSafe(grid, r, c, img, N)) {
-        grid[r][c] = img;
+      if (isSafeFast(flatGrid, index, img, adjList)) {
+        flatGrid[index] = img;
         if (solve(index + 1)) {
           return true;
         }
-        grid[r][c] = ''; // 퇴각 검색 (Backtrack)
+        flatGrid[index] = ''; // 백트랙
       }
     }
     return false;
   }
 
   const success = solve(0);
+  const grid: string[][] = Array.from({ length: N }, () => Array(N).fill(''));
+
   if (!success) {
-    console.warn('Torus Backtracking failed to find a perfect map, falling back to random allocation.');
-    // 34종 이상의 이미지 풀이 있어 사실상 실패 확률은 0%에 수렴하나, 방어적 대비 코드 추가
-    for (let r = 0; r < N; r++) {
-      for (let c = 0; c < N; c++) {
-        if (grid[r][c] === '') {
-          grid[r][c] = petImages[Math.floor(Math.random() * petImages.length)];
-        }
-      }
+    console.warn('Physical Backtracking failed to find a perfect map, falling back to random allocation.');
+    for (let i = 0; i < N * N; i++) {
+      const r = Math.floor(i / N);
+      const c = i % N;
+      grid[r][c] = flatGrid[i] !== '' ? flatGrid[i] : petImages[Math.floor(Math.random() * petImages.length)];
+    }
+  } else {
+    for (let i = 0; i < N * N; i++) {
+      const r = Math.floor(i / N);
+      const c = i % N;
+      grid[r][c] = flatGrid[i];
     }
   }
   return grid;
@@ -128,10 +194,19 @@ export default function Home() {
   const [tick, setTick] = useState(0);
   const [isMounted, setIsMounted] = useState(false); // 하이드레이션 에러 방지용 마운트 검증 상태
 
-  // 백트래킹으로 생성된 2D 충돌 배제 펫 맵 상태
+  // 백트래킹으로 생성된 물리적 중복 배제 펫 맵 상태
   const [petMap, setPetMap] = useState<string[][]>([]);
 
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // 화면 크기 및 타일 배치 정보
+  const tileSize = 100;
+  const gapX = 336; // X축(가로) 간격
+  const gapY = 48;  // Y축(세로) 간격
+  const pitchX = tileSize + gapX; // 436px
+  const pitchY = tileSize + gapY; // 148px
+  const N = 40; // 40x40 지도 스케일
+  const distanceThreshold = 450; // 물리적 2D 유클리드 거리 임계값 (450px 이내 동일 캐릭터 배치 차단)
 
   // 1. 컴포넌트 마운트 시 실시간으로 /api/pets API를 호출하여 파일 목록 갱신 및 윈도우 크기 설정
   useEffect(() => {
@@ -145,16 +220,16 @@ export default function Home() {
       .then(data => {
         if (Array.isArray(data) && data.length > 0) {
           setPetImages(data);
-          const map = generateTorusMap(data, 40); // 40x40 지도 빌드
+          const map = generateTorusPhysicalMap(data, N, pitchX, pitchY, tileSize, distanceThreshold);
           setPetMap(map);
         } else {
-          const map = generateTorusMap(fallbackPetImages, 40);
+          const map = generateTorusPhysicalMap(fallbackPetImages, N, pitchX, pitchY, tileSize, distanceThreshold);
           setPetMap(map);
         }
       })
       .catch(err => {
         console.warn('Vite API server not running or production environment, falling back to static list:', err);
-        const map = generateTorusMap(fallbackPetImages, 40);
+        const map = generateTorusPhysicalMap(fallbackPetImages, N, pitchX, pitchY, tileSize, distanceThreshold);
         setPetMap(map);
       });
   }, []);
@@ -244,12 +319,6 @@ export default function Home() {
   }
 
   // 6. 화면 크기와 스크롤 오프셋을 바탕으로 렌더링에 필요한 타일 범위 및 위치 계산
-  const tileSize = 100;
-  const gapX = 336; // X축(가로) 간격
-  const gapY = 48;  // Y축(세로) 간격
-  const pitchX = tileSize + gapX; // 436px
-  const pitchY = tileSize + gapY; // 148px
-
   // 화면 여백 및 오프셋 보완을 위해 좌우상하 범위를 넓게(3개 타일 분량 추가) 설정 (1배율 기준)
   const cols = Math.ceil(winSize.w / pitchX) + 3;
   const rows = Math.ceil(winSize.h / pitchY) + 3;
