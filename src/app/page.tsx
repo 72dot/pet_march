@@ -59,9 +59,6 @@ export default function Home() {
   const [scroll, setScroll] = useState({ x: 0, y: 0 });
   const [tick, setTick] = useState(0);
 
-  // 배경음악(BGM) 재생 상태 및 볼륨 상태
-  const [isAudioMuted, setIsAudioMuted] = useState(true);
-  
   const containerRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -84,35 +81,37 @@ export default function Home() {
       });
   }, []);
 
-  // 2. 배경음악 자동 재생 정책 대응 글로벌 리스너 등록
+  // 2. 배경음악 즉시 자동 재생 및 브라우저 자동 재생 제약 우회 리스너
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
     audio.loop = true;
-    audio.volume = 0.5; // 너무 크지 않도록 적절한 볼륨(50%)으로 설정
+    audio.volume = 0.5; // 배경음악 적절 볼륨
 
-    // 브라우저의 오디오 자동재생 제약을 풀기 위해 사용자의 첫 터치/클릭 감지 시 오디오 재생을 부드럽게 개시
-    const initAndPlayAudio = () => {
-      audio.play()
-        .then(() => {
-          setIsAudioMuted(false); // 재생 성공 시 뮤트 상태 해제
-        })
-        .catch(err => {
-          console.log('Autoplay blocked by browser. Awaiting explicit user click.', err);
-        });
+    // 브라우저가 즉시 play()를 허용하는 경우 바로 재생 시도
+    audio.play().catch(err => {
+      console.log('Autoplay blocked. Background music will start on first user interaction.', err);
+    });
 
-      // 리스너 정리
-      window.removeEventListener('click', initAndPlayAudio);
-      window.removeEventListener('touchstart', initAndPlayAudio);
+    // 만약 브라우저가 자동 재생을 막았다면, 사용자의 첫 클릭/터치/스크롤 등의 이벤트가 발생하는 즉시 재생 시작
+    const startAudioOnInteraction = () => {
+      audio.play().catch(e => console.log('Interactive play failed:', e));
+      
+      // 단 한 번만 실행되도록 리스너를 즉시 제거
+      window.removeEventListener('click', startAudioOnInteraction);
+      window.removeEventListener('touchstart', startAudioOnInteraction);
+      window.removeEventListener('scroll', startAudioOnInteraction);
     };
 
-    window.addEventListener('click', initAndPlayAudio);
-    window.addEventListener('touchstart', initAndPlayAudio);
+    window.addEventListener('click', startAudioOnInteraction);
+    window.addEventListener('touchstart', startAudioOnInteraction);
+    window.addEventListener('scroll', startAudioOnInteraction);
 
     return () => {
-      window.removeEventListener('click', initAndPlayAudio);
-      window.removeEventListener('touchstart', initAndPlayAudio);
+      window.removeEventListener('click', startAudioOnInteraction);
+      window.removeEventListener('touchstart', startAudioOnInteraction);
+      window.removeEventListener('scroll', startAudioOnInteraction);
     };
   }, []);
 
@@ -185,25 +184,6 @@ export default function Home() {
     animationFrameId = requestAnimationFrame(updateScroll);
     return () => cancelAnimationFrame(animationFrameId);
   }, []);
-
-  // 오디오 음소거/해제 수동 토글 헬퍼
-  const toggleMute = (e: React.MouseEvent) => {
-    e.stopPropagation(); // 배경 클릭 이벤트 트리거 전이 방지
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    if (isAudioMuted) {
-      audio.play()
-        .then(() => {
-          setIsAudioMuted(false);
-          audio.muted = false;
-        })
-        .catch(err => console.error('Play failed:', err));
-    } else {
-      audio.muted = true;
-      setIsAudioMuted(true);
-    }
-  };
 
   // 새로고침 시 설정된 seed와 좌표값을 조합하여 일관된(결정론적) 이미지를 렌더링하는 헬퍼 함수
   function getDeterministicPetImage(x: number, y: number): string {
@@ -279,27 +259,6 @@ export default function Home() {
         preload="auto" 
         loop
       />
-
-      {/* 10. 프리미엄 플로팅 오디오 제어 버튼 UI (자동 재생이 차단될 수 있으므로 직관적인 토글 제공) */}
-      <button
-        onClick={toggleMute}
-        title={isAudioMuted ? "배경음악 켜기" : "배경음악 끄기"}
-        className="fixed top-6 right-6 z-50 flex items-center justify-center w-12 h-12 rounded-full border border-slate-200/80 bg-white/90 shadow-md backdrop-blur-sm transition-all duration-300 hover:bg-slate-50 active:scale-95 cursor-pointer"
-      >
-        {isAudioMuted ? (
-          <span className="text-xl text-slate-400 select-none">🔇</span>
-        ) : (
-          <div className="flex items-center justify-center gap-1.5">
-            <span className="text-xl text-emerald-500 select-none">🔊</span>
-            {/* 음파 댄싱 바 그래픽 효과 */}
-            <div className="flex items-end gap-[2px] h-3 w-3 select-none">
-              <span className="w-[1.5px] h-1.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s', animationDuration: '0.6s' }}></span>
-              <span className="w-[1.5px] h-2.5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0.3s', animationDuration: '0.8s' }}></span>
-              <span className="w-[1.5px] h-2 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0.5s', animationDuration: '0.5s' }}></span>
-            </div>
-          </div>
-        )}
-      </button>
 
       {/* GSAP 제어를 위한 ref 등록 및 초기 정중앙 기준점 설정 */}
       <div

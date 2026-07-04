@@ -12,7 +12,7 @@
       "static/chunks/4bd1b696-c023c6e3521b1417.js",
       "static/chunks/255-3981a3d1f3561bd8.js",
       "static/chunks/main-app-322a091e965b24fb.js",
-      "static/css/e7ae13ca53d93103.css",
+      "static/css/a84bf9b3ec012aec.css",
       "static/chunks/app/layout-58e77dac8da72a77.js"
     ],
     "/api/pets/route": [
@@ -29,7 +29,7 @@
       "static/chunks/main-app-322a091e965b24fb.js",
       "static/chunks/c15bf2b0-52e8419f34af26ab.js",
       "static/chunks/605-a7249f34438736f7.js",
-      "static/chunks/app/page-6e39634fa0b9e3f6.js"
+      "static/chunks/app/page-d9d11a0c99af3c97.js"
     ]
   }
 }
