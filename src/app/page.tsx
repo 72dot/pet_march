@@ -53,43 +53,109 @@ const fallbackPetImages = [
   '/pet/dog_Yorkshire_Terrier.webp'
 ];
 
+// 8방향 이웃 탐색 오프셋
+const dr = [-1, -1, -1, 0, 0, 1, 1, 1];
+const dc = [-1, 0, 1, -1, 1, -1, 0, 1];
+
+// 8방향 인접성 검사 (토러스 원형 경계 랩핑 보정 적용)
+function isSafe(grid: string[][], r: number, c: number, img: string, N: number): boolean {
+  for (let i = 0; i < 8; i++) {
+    const nr = (r + dr[i] + N) % N;
+    const nc = (c + dc[i] + N) % N;
+    if (grid[nr][nc] === img) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// 랜덤 셔플 헬퍼 함수 (무작위 후보군 대입용)
+function shuffleArray<T>(array: T[]): T[] {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// 2D 백트래킹(Backtracking) 알고리즘으로 N x N 토러스형 충돌 없는 지도 생성
+function generateTorusMap(petImages: string[], N: number): string[][] {
+  const grid: string[][] = Array.from({ length: N }, () => Array(N).fill(''));
+
+  function solve(index: number): boolean {
+    if (index === N * N) {
+      return true; // 전체 지도가 충돌 없이 완성됨
+    }
+
+    const r = Math.floor(index / N);
+    const c = index % N;
+
+    // 매번 후보 이미지를 셔플하여 새로고침할 때마다 매번 완전히 다른 레이아웃이 나오게 제어
+    const candidates = shuffleArray(petImages);
+
+    for (const img of candidates) {
+      if (isSafe(grid, r, c, img, N)) {
+        grid[r][c] = img;
+        if (solve(index + 1)) {
+          return true;
+        }
+        grid[r][c] = ''; // 퇴각 검색 (Backtrack)
+      }
+    }
+    return false;
+  }
+
+  const success = solve(0);
+  if (!success) {
+    console.warn('Torus Backtracking failed to find a perfect map, falling back to random allocation.');
+    // 34종 이상의 이미지 풀이 있어 사실상 실패 확률은 0%에 수렴하나, 방어적 대비 코드 추가
+    for (let r = 0; r < N; r++) {
+      for (let c = 0; c < N; c++) {
+        if (grid[r][c] === '') {
+          grid[r][c] = petImages[Math.floor(Math.random() * petImages.length)];
+        }
+      }
+    }
+  }
+  return grid;
+}
+
 export default function Home() {
   const [petImages, setPetImages] = useState<string[]>(fallbackPetImages);
   const [winSize, setWinSize] = useState<WinSize>({ w: 1200, h: 800 }); // 기본 초기값
   const [scroll, setScroll] = useState({ x: 0, y: 0 });
   const [tick, setTick] = useState(0);
+  const [isMounted, setIsMounted] = useState(false); // 하이드레이션 에러 방지용 마운트 검증 상태
+
+  // 백트래킹으로 생성된 2D 충돌 배제 펫 맵 상태
+  const [petMap, setPetMap] = useState<string[][]>([]);
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
-
-  const [isMuted, setIsMuted] = useState(true);
-
-  // 리프레시(새로고침)할 때마다 타일의 랜덤 배치가 완전히 바뀌도록 마운트 시점에 고유 시드(seed) 결정
-  const [seed] = useState(() => Math.floor(Math.random() * 1000000));
-
-  // 1. 오디오 Muted 변경 시 HTMLAudioElement 속성 동기화 및 재생
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.muted = isMuted;
-      audioRef.current.play().catch((err) => {
-        console.log('Autoplay check:', err);
-      });
-    }
-  }, [isMuted]);
 
   // 1. 컴포넌트 마운트 시 실시간으로 /api/pets API를 호출하여 파일 목록 갱신 및 윈도우 크기 설정
   useEffect(() => {
-    setWinSize({ w: window.innerWidth, h: window.innerHeight });
+    setIsMounted(true);
+    if (typeof window !== 'undefined') {
+      setWinSize({ w: window.innerWidth, h: window.innerHeight });
+    }
 
     fetch('/api/pets')
       .then(res => res.json())
       .then(data => {
         if (Array.isArray(data) && data.length > 0) {
           setPetImages(data);
+          const map = generateTorusMap(data, 40); // 40x40 지도 빌드
+          setPetMap(map);
+        } else {
+          const map = generateTorusMap(fallbackPetImages, 40);
+          setPetMap(map);
         }
       })
       .catch(err => {
         console.warn('Vite API server not running or production environment, falling back to static list:', err);
+        const map = generateTorusMap(fallbackPetImages, 40);
+        setPetMap(map);
       });
   }, []);
 
@@ -124,7 +190,7 @@ export default function Home() {
     });
 
     return () => ctx.revert();
-  }, [petImages]);
+  }, [petMap]); // 백트래킹 맵 로드 시점에 맞춤
 
   // 4. 화면 리사이즈 감지
   useEffect(() => {
@@ -163,11 +229,18 @@ export default function Home() {
     return () => cancelAnimationFrame(animationFrameId);
   }, []);
 
-  // 새로고침 시 설정된 seed와 좌표값을 조합하여 일관된(결정론적) 이미지를 렌더링하는 헬퍼 함수
+  // O(1) 성능의 토러스 2D 백트래킹 맵 룩업 헬퍼 함수
   function getDeterministicPetImage(x: number, y: number): string {
-    if (petImages.length === 0) return '';
-    const hash = Math.abs(((x + seed) * 73856093) ^ ((y + seed) * 19349663)) % petImages.length;
-    return petImages[hash];
+    if (petMap.length === 0) return '';
+    const N = petMap.length;
+    // 음수 인덱스 보정 모듈러 연산으로 상하좌우 무한 타일링(Tiling) 안전 구현
+    const mapX = ((x % N) + N) % N;
+    const mapY = ((y % N) + N) % N;
+    return petMap[mapY][mapX];
+  }
+
+  if (!isMounted || petMap.length === 0) {
+    return <div className="w-screen h-screen bg-[#ffffff]" />;
   }
 
   // 6. 화면 크기와 스크롤 오프셋을 바탕으로 렌더링에 필요한 타일 범위 및 위치 계산
@@ -229,26 +302,6 @@ export default function Home() {
 
   return (
     <div className="w-screen h-screen overflow-hidden bg-[#ffffff] relative select-none pointer-events-none">
-      {/* 배경음악 오디오 요소 */}
-      <audio
-        ref={audioRef}
-        src="/bgm/pet_march_bgm.opus"
-        loop
-        autoPlay
-        playsInline
-      />
-
-      {/* 우측 상단 음소거 토글 버튼 */}
-      <button
-        onClick={() => setIsMuted(prev => !prev)}
-        className="absolute top-6 right-6 z-50 flex items-center justify-center w-12 h-12 bg-white/90 hover:bg-white border border-slate-200/80 rounded-full shadow-lg backdrop-blur-sm pointer-events-auto transition-all duration-200 active:scale-95 text-slate-800 cursor-pointer"
-        aria-label="배경음악 토글"
-      >
-        <span className="material-icons text-2xl select-none">
-          {isMuted ? 'volume_up' : 'volume_off'}
-        </span>
-      </button>
-
       {/* GSAP 제어를 위한 ref 등록 및 초기 정중앙 기준점 설정 */}
       <div
         ref={containerRef}
