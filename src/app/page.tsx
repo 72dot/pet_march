@@ -196,6 +196,7 @@ export default function Home() {
 
   // 백트래킹으로 생성된 물리적 중복 배제 펫 맵 상태
   const [petMap, setPetMap] = useState<string[][]>([]);
+  const [cacheKey, setCacheKey] = useState('');
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -211,6 +212,7 @@ export default function Home() {
   // 1. 컴포넌트 마운트 시 실시간으로 /api/pets API를 호출하여 파일 목록 갱신 및 윈도우 크기 설정
   useEffect(() => {
     setIsMounted(true);
+    setCacheKey(Date.now().toString());
     if (typeof window !== 'undefined') {
       setWinSize({ w: window.innerWidth, h: window.innerHeight });
     }
@@ -350,6 +352,7 @@ export default function Home() {
       const top = yPos - scroll.y;
 
       const image = getDeterministicPetImage(gridX, gridY);
+      const imageUrl = image ? `${image}?v=${cacheKey}` : '';
       const key = `${gridX}_${gridY}`;
 
       tileElements.push(
@@ -359,7 +362,7 @@ export default function Home() {
           style={{
             left: `${left}px`,
             top: `${top}px`,
-            backgroundImage: `url(${image})`,
+            backgroundImage: `url(${imageUrl})`,
             backgroundSize: '200px 200px',
             backgroundPosition: `-${frameCoords.x}px -${frameCoords.y}px`,
             backgroundRepeat: 'no-repeat',
