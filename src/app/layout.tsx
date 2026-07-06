@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Pet Sprite Loop Viewer',
+  title: 'Pet March',
   description: 'Infinite diagonal scrolling pet sprite animations',
 };
 
